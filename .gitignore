@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Node
+node_modules/
+
+# Flutter
+gse_app/.dart_tool/
+gse_app/build/
+gse_app/.flutter-plugins
+gse_app/.flutter-plugins-dependencies
+
+# IDE
+.vscode/
+.idea/
+
+# Cloudflare
+.wrangler/
