@@ -4,7 +4,6 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    // CORS headers
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
@@ -18,7 +17,6 @@ export default {
     try {
       let response;
 
-      // Routes
       if (path === "/api/stocks" && method === "GET") {
         response = await getStocks(env);
       } else if (path.match(/^\/api\/stocks\/[\w]+$/) && method === "GET") {
@@ -41,13 +39,18 @@ export default {
         const symbol = path.split("/")[3];
         response = await getAIInsight(env, symbol);
       } else if (path === "/api/scraper/prices" && method === "POST") {
-        // Endpoint for scraper to push data
         const apiKey = request.headers.get("X-API-Key");
         if (apiKey !== env.SCRAPER_API_KEY) {
           return new Response("Unauthorized", { status: 401, headers: corsHeaders });
         }
         const body = await request.json();
         response = await savePrices(env, body);
+      } else if (path === "/api/users/fcm-token" && method === "POST") {
+        const body = await request.json();
+        response = await saveFcmToken(env, body);
+      } else if (path === "/api/ai/chat" && method === "POST") {
+        const body = await request.json();
+        response = await aiChat(env, body);
       } else if (path === "/health") {
         response = { status: "ok", time: new Date().toISOString() };
       } else {
@@ -69,11 +72,9 @@ export default {
 // --- Route Handlers ---
 
 async function getStocks(env) {
-  // Try cache first
   const cached = await env.CACHE.get("latest_prices", "json");
   if (cached) return cached;
 
-  // Get latest price for each stock
   const result = await env.DB.prepare(`
     SELECT s.symbol, s.name, s.sector, p.price, p.change_value, p.change_percent, p.volume, p.recorded_at
     FROM stocks s
@@ -82,7 +83,6 @@ async function getStocks(env) {
     ORDER BY s.symbol
   `).all();
 
-  // Cache for 5 minutes
   await env.CACHE.put("latest_prices", JSON.stringify(result.results), { expirationTtl: 300 });
   return result.results;
 }
@@ -140,7 +140,6 @@ async function deleteAlert(env, alertId) {
 }
 
 async function savePrices(env, prices) {
-  // prices = [{ symbol, price, change_value, change_percent, volume }]
   const timestamp = new Date().toISOString();
 
   for (const p of prices) {
@@ -168,11 +167,7 @@ async function savePrices(env, prices) {
     }
 
     if (triggered) {
-      triggeredAlerts.push({
-        ...alert,
-        current_price: priceData.price
-      });
-      // Deactivate the alert after triggering
+      triggeredAlerts.push({ ...alert, current_price: priceData.price });
       await env.DB.prepare(
         `UPDATE alerts SET is_active = 0 WHERE id = ?`
       ).bind(alert.id).run();
@@ -180,38 +175,32 @@ async function savePrices(env, prices) {
   }
 
   if (triggeredAlerts.length > 0) {
-  for (const alert of triggeredAlerts) {
-    const user = await env.DB.prepare(
-      `SELECT fcm_token FROM users WHERE id = ?`
-    ).bind(alert.user_id).first();
+    for (const alert of triggeredAlerts) {
+      const user = await env.DB.prepare(
+        `SELECT fcm_token FROM users WHERE id = ?`
+      ).bind(alert.user_id).first();
 
-    if (user && user.fcm_token) {
-      const direction = alert.alert_type === 'price_above' ? 'risen above' : 'dropped below';
-      await sendPushNotification(
-        env,
-        user.fcm_token,
-        `${alert.symbol} Alert`,
-        `${alert.symbol} has ${direction} GHS ${alert.target_value}. Current price: GHS ${alert.current_price}`
-      );
+      if (user && user.fcm_token) {
+        const direction = alert.alert_type === 'price_above' ? 'risen above' : 'dropped below';
+        await sendPushNotification(
+          env,
+          user.fcm_token,
+          `${alert.symbol} Alert`,
+          `${alert.symbol} has ${direction} GHS ${alert.target_value}. Current price: GHS ${alert.current_price}`
+        );
+      }
     }
   }
-}
 
   await env.CACHE.delete("latest_prices");
   return { message: `Saved ${prices.length} prices, triggered ${triggeredAlerts.length} alerts` };
-
-  // Clear cache so next request gets fresh data
-  await env.CACHE.delete("latest_prices");
-  return { message: `Saved ${prices.length} prices` };
 }
 
 async function getAIInsight(env, symbol) {
-  // Check cache (AI insights cached for 1 hour)
   const cacheKey = `ai_${symbol}`;
   const cached = await env.CACHE.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  // Get recent prices for analysis
   const history = await env.DB.prepare(`
     SELECT price, recorded_at FROM stock_prices
     WHERE symbol = ? ORDER BY recorded_at DESC LIMIT 60
@@ -222,13 +211,10 @@ async function getAIInsight(env, symbol) {
   }
 
   const prices = history.results.map(r => r.price).reverse();
-
-  // Simple technical analysis
   const sma20 = prices.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, prices.length);
   const currentPrice = prices[prices.length - 1];
   const priceChange = ((currentPrice - prices[0]) / prices[0]) * 100;
 
-  // RSI calculation (simplified)
   let gains = 0, losses = 0;
   for (let i = 1; i < prices.length; i++) {
     const diff = prices[i] - prices[i - 1];
@@ -238,7 +224,6 @@ async function getAIInsight(env, symbol) {
   const rs = gains / (losses || 1);
   const rsi = 100 - (100 / (1 + rs));
 
-  // Build signals
   const signals = [];
   if (currentPrice > sma20) signals.push("Price above moving average (bullish)");
   else signals.push("Price below moving average (bearish)");
@@ -247,7 +232,6 @@ async function getAIInsight(env, symbol) {
   if (priceChange > 5) signals.push(`Up ${priceChange.toFixed(1)}% recently`);
   else if (priceChange < -5) signals.push(`Down ${Math.abs(priceChange).toFixed(1)}% recently`);
 
-  // Call Gemini for natural language insight
   let aiText = "";
   try {
     const geminiResponse = await fetch(
@@ -280,21 +264,17 @@ async function getAIInsight(env, symbol) {
     generated_at: new Date().toISOString()
   };
 
-  // Cache for 1 hour
   await env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 });
   return result;
+}
 
 async function sendPushNotification(env, fcmToken, title, body) {
   try {
-    // Decode service account
     const serviceAccountJson = atob(env.FIREBASE_SERVICE_ACCOUNT);
     const serviceAccount = JSON.parse(serviceAccountJson);
-
-    // Get access token
     const accessToken = await getFirebaseAccessToken(serviceAccount);
-
-    // Send notification using V1 API
     const projectId = serviceAccount.project_id;
+
     const response = await fetch(
       `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
       {
@@ -306,10 +286,7 @@ async function sendPushNotification(env, fcmToken, title, body) {
         body: JSON.stringify({
           message: {
             token: fcmToken,
-            notification: {
-              title: title,
-              body: body,
-            },
+            notification: { title: title, body: body },
           },
         }),
       }
@@ -325,7 +302,6 @@ async function sendPushNotification(env, fcmToken, title, body) {
 }
 
 async function getFirebaseAccessToken(serviceAccount) {
-  // Create JWT
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'RS256', typ: 'JWT' };
   const payload = {
@@ -340,7 +316,6 @@ async function getFirebaseAccessToken(serviceAccount) {
   const encodedPayload = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const unsignedToken = `${encodedHeader}.${encodedPayload}`;
 
-  // Sign with RSA private key
   const privateKey = serviceAccount.private_key;
   const key = await crypto.subtle.importKey(
     'pkcs8',
@@ -361,7 +336,6 @@ async function getFirebaseAccessToken(serviceAccount) {
 
   const jwt = `${unsignedToken}.${encodedSignature}`;
 
-  // Exchange JWT for access token
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -393,4 +367,40 @@ async function saveFcmToken(env, body) {
   return { message: "Token saved" };
 }
 
+async function aiChat(env, body) {
+  const { question } = body;
+
+  const prices = await env.DB.prepare(`
+    SELECT s.symbol, s.name, p.price, p.change_value, p.change_percent, p.volume
+    FROM stocks s
+    LEFT JOIN stock_prices p ON s.symbol = p.symbol
+    AND p.recorded_at = (SELECT MAX(recorded_at) FROM stock_prices WHERE symbol = s.symbol)
+    ORDER BY s.symbol
+  `).all();
+
+  const stockContext = prices.results
+    .filter(p => p.price)
+    .map(p => `${p.symbol} (${p.name}): GHS ${p.price}, change ${p.change_percent}%, vol ${p.volume}`)
+    .join('\n');
+
+  const prompt = `You are a Ghana Stock Exchange analyst. Here are the current stock prices:\n\n${stockContext}\n\nUser question: ${question}\n\nProvide a helpful, concise answer. If recommending buy/sell, explain your reasoning briefly. Always include a disclaimer that this is not financial advice.`;
+
+  try {
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      }
+    );
+
+    const data = await geminiResponse.json();
+    const answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Unable to generate response.';
+    return { answer };
+  } catch (e) {
+    return { answer: 'AI service temporarily unavailable. Please try again.' };
+  }
 }
