@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/api_service.dart';
+import 'ai_chat_screen.dart';
 
 class StockDetailScreen extends StatefulWidget {
   final String symbol;
@@ -14,6 +15,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   final ApiService _api = ApiService();
   String selectedPeriod = '1m';
   List<FlSpot> chartData = [];
+  List<String> _dates = [];
   Map<String, dynamic>? aiInsight;
   bool loadingChart = true;
   bool loadingAI = false;
@@ -38,6 +40,14 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             (e.value['price'] as num).toDouble(),
           );
         }).toList();
+        _dates = data.map((e) {
+          final date = e['recorded_at'] ?? '';
+          // Show just day/month from the timestamp
+          if (date.length >= 10) {
+            return '${date.substring(8, 10)}/${date.substring(5, 7)}';
+          }
+          return date;
+        }).toList().cast<String>();
         loadingChart = false;
       });
     } catch (e) {
@@ -58,6 +68,83 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     }
   }
 
+  Future<void> _showAlertDialog() async {
+  String alertType = 'price_above';
+  final priceController = TextEditingController();
+
+  await showDialog(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text('Set Alert for ${widget.symbol}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              decoration: const InputDecoration(labelText: 'Alert when'),
+              value: alertType,
+              items: const [
+                DropdownMenuItem(
+                  value: 'price_above',
+                  child: Text('Price goes above'),
+                ),
+                DropdownMenuItem(
+                  value: 'price_below',
+                  child: Text('Price drops below'),
+                ),
+              ],
+              onChanged: (val) =>
+                  setDialogState(() => alertType = val ?? 'price_above'),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: priceController,
+              decoration: const InputDecoration(
+                labelText: 'Target price (GHS)',
+                prefixText: 'GHS ',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (priceController.text.isNotEmpty) {
+                try {
+                  await _api.createAlert(
+                    userId: 1,
+                    symbol: widget.symbol,
+                    alertType: alertType,
+                    targetValue: double.parse(priceController.text),
+                  );
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    const SnackBar(content: Text('Alert created!')),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(this.context).showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF006B3F),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -65,6 +152,23 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         title: Text(widget.symbol),
         backgroundColor: const Color(0xFF006B3F),
         foregroundColor: Colors.white,
+        actions: [
+          IconButton (
+            icon: const Icon(Icons.auto_awesome),
+            onPressed: () {
+              Navigator.push(
+                context, 
+                MaterialPageRoute(
+                  builder: (_) => AIChatScreen (symbol: widget.symbol),
+                  ),
+                );
+            },
+          ),
+          IconButton (
+            icon: const Icon(Icons.notification_add),
+            onPressed: () => _showAlertDialog(),
+            ),
+        ],
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -102,9 +206,60 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
                           padding: const EdgeInsets.all(16),
                           child: LineChart(
                             LineChartData(
-                              gridData: const FlGridData(show: false),
-                              titlesData: const FlTitlesData(show: false),
-                              borderData: FlBorderData(show: false),
+                              gridData: FlGridData(
+                                show: true,
+                                drawVerticalLine: false,
+                                horizontalInterval: 1,
+                                getDrawingHorizontalLine: (value) {
+                                  return FlLine(
+                                    color: Colors.grey.shade300,
+                                    strokeWidth: 0.5,
+                                  );
+                                },
+                              ),
+                              titlesData: FlTitlesData(
+                                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                leftTitles: AxisTitles(
+                                  axisNameWidget: const Text('GHS', style: TextStyle(fontSize: 10)),
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    reservedSize: 45,
+                                    getTitlesWidget: (value, meta) {
+                                      return Text(
+                                        value.toStringAsFixed(2),
+                                        style: const TextStyle(fontSize: 10),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                bottomTitles: AxisTitles(
+                                  axisNameWidget: const Text('Date', style: TextStyle(fontSize: 10)),
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    reservedSize: 30,
+                                    interval: chartData.length > 10 ? (chartData.length / 5).ceilToDouble() : 1,
+                                    getTitlesWidget: (value, meta) {
+                                      final index = value.toInt();
+                                      if (index < 0 || index >= _dates.length) return const Text('');
+                                      return Transform.rotate(
+                                        angle: -0.5,
+                                        child: Text(
+                                          _dates[index],
+                                          style: const TextStyle(fontSize: 9),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              borderData: FlBorderData(
+                                show: true,
+                                border: Border(
+                                  bottom: BorderSide(color: Colors.grey.shade400),
+                                  left: BorderSide(color: Colors.grey.shade400),
+                                ),
+                              ),
                               lineBarsData: [
                                 LineChartBarData(
                                   spots: chartData,
@@ -114,8 +269,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
                                   dotData: const FlDotData(show: false),
                                   belowBarData: BarAreaData(
                                     show: true,
-                                    color: const Color(0xFF006B3F)
-                                        .withOpacity(0.1),
+                                    color: const Color(0xFF006B3F).withOpacity(0.1),
                                   ),
                                 ),
                               ],
