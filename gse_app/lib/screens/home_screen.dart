@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gse_app/screens/alerts_screen.dart';
 import '../services/api_service.dart';
 import 'stock_detail_screen.dart';
 
@@ -48,6 +49,15 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: const Color(0xFF006B3F),
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: (){
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AlertsScreen()),
+                );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: fetchStocks,

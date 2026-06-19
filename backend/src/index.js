@@ -150,6 +150,56 @@ async function savePrices(env, prices) {
     `).bind(p.symbol, p.price, p.change_value || 0, p.change_percent || 0, p.volume || 0, timestamp).run();
   }
 
+  // Check alerts
+  const activeAlerts = await env.DB.prepare(
+    `SELECT * FROM alerts WHERE is_active = 1`
+  ).all();
+
+  const triggeredAlerts = [];
+  for (const alert of activeAlerts.results) {
+    const priceData = prices.find(p => p.symbol === alert.symbol);
+    if (!priceData) continue;
+
+    let triggered = false;
+    if (alert.alert_type === 'price_above' && priceData.price >= alert.target_value) {
+      triggered = true;
+    } else if (alert.alert_type === 'price_below' && priceData.price <= alert.target_value) {
+      triggered = true;
+    }
+
+    if (triggered) {
+      triggeredAlerts.push({
+        ...alert,
+        current_price: priceData.price
+      });
+      // Deactivate the alert after triggering
+      await env.DB.prepare(
+        `UPDATE alerts SET is_active = 0 WHERE id = ?`
+      ).bind(alert.id).run();
+    }
+  }
+
+  if (triggeredAlerts.length > 0) {
+  for (const alert of triggeredAlerts) {
+    const user = await env.DB.prepare(
+      `SELECT fcm_token FROM users WHERE id = ?`
+    ).bind(alert.user_id).first();
+
+    if (user && user.fcm_token) {
+      const direction = alert.alert_type === 'price_above' ? 'risen above' : 'dropped below';
+      await sendPushNotification(
+        env,
+        user.fcm_token,
+        `${alert.symbol} Alert`,
+        `${alert.symbol} has ${direction} GHS ${alert.target_value}. Current price: GHS ${alert.current_price}`
+      );
+    }
+  }
+}
+
+  await env.CACHE.delete("latest_prices");
+  return { message: `Saved ${prices.length} prices, triggered ${triggeredAlerts.length} alerts` };
+
   // Clear cache so next request gets fresh data
   await env.CACHE.delete("latest_prices");
   return { message: `Saved ${prices.length} prices` };
@@ -233,4 +283,114 @@ async function getAIInsight(env, symbol) {
   // Cache for 1 hour
   await env.CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 });
   return result;
+
+async function sendPushNotification(env, fcmToken, title, body) {
+  try {
+    // Decode service account
+    const serviceAccountJson = atob(env.FIREBASE_SERVICE_ACCOUNT);
+    const serviceAccount = JSON.parse(serviceAccountJson);
+
+    // Get access token
+    const accessToken = await getFirebaseAccessToken(serviceAccount);
+
+    // Send notification using V1 API
+    const projectId = serviceAccount.project_id;
+    const response = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: {
+            token: fcmToken,
+            notification: {
+              title: title,
+              body: body,
+            },
+          },
+        }),
+      }
+    );
+
+    const result = await response.json();
+    if (!response.ok) {
+      console.error('FCM error:', result);
+    }
+  } catch (e) {
+    console.error('Failed to send push notification:', e);
+  }
+}
+
+async function getFirebaseAccessToken(serviceAccount) {
+  // Create JWT
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.messaging',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const encodedHeader = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const encodedPayload = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const unsignedToken = `${encodedHeader}.${encodedPayload}`;
+
+  // Sign with RSA private key
+  const privateKey = serviceAccount.private_key;
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToArrayBuffer(privateKey),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    new TextEncoder().encode(unsignedToken)
+  );
+
+  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+  const jwt = `${unsignedToken}.${encodedSignature}`;
+
+  // Exchange JWT for access token
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+
+  const tokenData = await tokenResponse.json();
+  return tokenData.access_token;
+}
+
+function pemToArrayBuffer(pem) {
+  const b64 = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\n/g, '');
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function saveFcmToken(env, body) {
+  const { user_id, fcm_token } = body;
+  await env.DB.prepare(
+    `UPDATE users SET fcm_token = ? WHERE id = ?`
+  ).bind(fcm_token, user_id).run();
+  return { message: "Token saved" };
+}
+
 }

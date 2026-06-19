@@ -123,10 +123,25 @@
 
 
 import 'package:flutter/material.dart';
+import 'package:gse_app/services/notification_service.dart';
 import 'screens/home_screen.dart';
 
-void main() {
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(const GSEApp());
+}
+
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+  // Handle background notification
 }
 
 class GSEApp extends StatelessWidget {

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "185606335818",
+    "project_id": "gse-stock-app",
+    "storage_bucket": "gse-stock-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:185606335818:android:9a361439fab513a384a5b3",
+        "android_client_info": {
+          "package_name": "com.gsestocks.gse_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCCrC9R00sChuGnKHIOGnCDsa8X0pG_EXY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
