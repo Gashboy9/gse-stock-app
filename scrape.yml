@@ -1,0 +1,35 @@
+name: Scrape GSE Prices
+
+on:
+  schedule:
+    # Every 5 minutes during trading hours (10:00-14:55 UTC, Mon-Fri)
+    # Ghana is on UTC/GMT, so 10am-3pm GMT = 10-15 UTC
+    - cron: '*/5 10-14 * * 1-5'
+  workflow_dispatch: # Allow manual trigger for testing
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd scraper
+          pip install playwright requests python-dotenv beautifulsoup4
+          playwright install chromium
+          playwright install-deps
+
+      - name: Run scraper
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+        run: |
+          cd scraper
+          python scrape.py

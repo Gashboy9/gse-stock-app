@@ -19,3 +19,8 @@ gse_app/.flutter-plugins-dependencies
 
 # Cloudflare
 .wrangler/
+
+# SCRAPER_API_KEY
+# gse-scraper-secret-key-2026
+# URL
+#   https://gse-stock-api.gabriel-dahaman.workers.dev

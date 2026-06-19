@@ -1,0 +1,12 @@
+name = "gse-stock-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gse-stocks"
+database_id = "c1d0e7b8-8ba5-48c7-9bbb-0bea3578f713"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "5123682cdaa84b318dd75df711670608"
