@@ -83,7 +83,7 @@ async function getStocks(env) {
     ORDER BY s.symbol
   `).all();
 
-  await env.CACHE.put("latest_prices", JSON.stringify(result.results), { expirationTtl: 300 });
+  await env.CACHE.put("latest_prices", JSON.stringify(result.results), { expirationTtl: 60 });
   return result.results;
 }
 
