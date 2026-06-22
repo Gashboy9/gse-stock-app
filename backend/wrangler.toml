@@ -10,3 +10,6 @@ database_id = "c1d0e7b8-8ba5-48c7-9bbb-0bea3578f713"
 [[kv_namespaces]]
 binding = "CACHE"
 id = "5123682cdaa84b318dd75df711670608"
+
+[ai]
+binding = "AI"

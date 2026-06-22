@@ -234,22 +234,14 @@ async function getAIInsight(env, symbol) {
 
   let aiText = "";
   try {
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `You are a Ghana Stock Exchange analyst. Stock: ${symbol}. Current price: GHS ${currentPrice}. Technical signals: ${signals.join(", ")}. RSI: ${rsi.toFixed(0)}. Price trend: ${priceChange.toFixed(1)}% over the period. Give a 2-3 sentence recommendation (BUY/HOLD/SELL) with brief reasoning. End with a one-line disclaimer.`
-            }]
-          }]
-        })
-      }
-    );
-    const geminiData = await geminiResponse.json();
-    aiText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const result = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+      messages: [
+        { role: 'system', content: 'You are a Ghana Stock Exchange analyst. Give brief recommendations.' },
+        { role: 'user', content: `Stock: ${symbol}. Current price: GHS ${currentPrice}. Technical signals: ${signals.join(", ")}. RSI: ${rsi.toFixed(0)}. Price trend: ${priceChange.toFixed(1)}% over the period. Give a 2-3 sentence recommendation (BUY/HOLD/SELL) with brief reasoning. End with a one-line disclaimer.` }
+      ],
+      max_tokens: 200
+    });
+    aiText = result.response || "";
   } catch (e) {
     aiText = `Based on technical indicators: ${signals.join(". ")}. This is not financial advice.`;
   }
@@ -386,21 +378,16 @@ async function aiChat(env, body) {
   const prompt = `You are a Ghana Stock Exchange analyst. Here are the current stock prices:\n\n${stockContext}\n\nUser question: ${question}\n\nProvide a helpful, concise answer. If recommending buy/sell, explain your reasoning briefly. Always include a disclaimer that this is not financial advice.`;
 
   try {
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
-    );
+    const result = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+      messages: [
+        { role: 'system', content: 'You are a helpful Ghana Stock Exchange analyst. Give concise, practical answers about stock trading.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 500
+    });
 
-    const data = await geminiResponse.json();
-    const answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Unable to generate response.';
-    return { answer };
+    return { answer: result.response || 'Unable to generate response.' };
   } catch (e) {
-    return { answer: 'AI service temporarily unavailable. Please try again.' };
+    return { answer: 'AI service temporarily unavailable: ' + e.message };
   }
 }

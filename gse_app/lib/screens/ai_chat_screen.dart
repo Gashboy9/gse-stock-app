@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../services/api_service.dart';
 
 class AIChatScreen extends StatefulWidget {
   final String? symbol;
